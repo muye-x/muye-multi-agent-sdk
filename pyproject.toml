@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "muye-multi-agent-sdk"
+dynamic = ["version"]
+description = "Muye 独立多 Agent SDK，支持 Custom、Graph 和 ReAct 模式"
+readme = "README.md"
+license = "MIT"
+authors = [{name = "Muye"}]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+    "httpx>=0.27",
+    "langchain-core>=1.2.0",
+    "langchain>=1.2.15",
+    "langchain-openai>=0.3.0",
+    "langgraph>=1.1.6",
+    "langgraph-checkpoint-sqlite>=3.0.3",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+# Postgres 持久化后端
+postgres = [
+    "langgraph-checkpoint-postgres>=3.0.5",
+    "psycopg-pool>=3.2.0",
+]
+all = [
+    "langgraph-checkpoint-postgres>=3.0.5",
+    "psycopg-pool>=3.2.0",
+]
+# 开发工具
+dev = [
+    "build>=1.2.2",
+    "setuptools>=77.0.3",
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23.0",
+    "respx>=0.21",
+    "wheel>=0.41",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["muye_multi_agent_sdk*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "muye_multi_agent_sdk.version.SDK_VERSION"}
+
+[tool.setuptools.package-data]
+muye_multi_agent_sdk = ["py.typed"]
