@@ -6,7 +6,7 @@ import logging
 from abc import abstractmethod
 from collections.abc import AsyncIterator
 from inspect import isawaitable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -18,6 +18,10 @@ from ..integrations.factory import build_chat_model
 from ..runtime import ExecutionOptions
 from ..safety import GuardContext, GuardHistoryMessage
 from .base import BaseAgent
+
+# 按需加载
+if TYPE_CHECKING:
+    from ..integrations.muye_data import DataClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +35,9 @@ class ReActAgent(BaseAgent):
         *,
         model: BaseChatModel | None = None,
         guard_model: BaseChatModel | None = None,
+        data_client: DataClient | None = None,
     ) -> None:
-        super().__init__(config)
+        super().__init__(config, data_client=data_client)
         self._model = model
         self._guard_model = guard_model
         self._model_owned_by_sdk = False

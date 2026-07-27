@@ -1,6 +1,6 @@
 """Muye Multi-Agent SDK 的公共接口。"""
 
-from .config import AgentConfig, ApiConfig, ContextConfig, IntentGuardConfig, ModelConfig
+from .config import AgentConfig, ApiConfig, ContextConfig, DataConfig, IntentGuardConfig, ModelConfig
 from .contracts import (
     AgentCapabilities,
     AgentContext,
@@ -22,7 +22,7 @@ __version__ = SDK_VERSION
 __all__ = [
     "AgentCapabilities", "AgentConfig", "AgentContext", "AgentError", "AgentEvent", "AgentMetadata",
     "AgentRequest", "AgentResult", "ApiConfig", "BaseAgent", "CancelRequest", "CancelResponse",
-    "ContextConfig", "CustomAgent", "GraphAgent", "INTERNAL_PROTOCOL_VERSION", "IntentGuardConfig",
+    "ContextConfig", "CustomAgent", "DataConfig", "GraphAgent", "INTERNAL_PROTOCOL_VERSION", "IntentGuardConfig",
     "ModelConfig", "PUBLIC_PROTOCOL_VERSION", "ReActAgent",
     "SDK_VERSION", "ToolCapability", "create_app",
 ]

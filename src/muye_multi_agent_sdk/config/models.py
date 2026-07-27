@@ -4,11 +4,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 
 DEFAULT_MUYE_LLM_BASE_URL = "http://127.0.0.1:9850"
+DEFAULT_MUYE_DATA_BASE_URL = "http://127.0.0.1:9840"
 
 
 def normalize_model_base_url(value: str) -> str:
@@ -16,6 +18,21 @@ def normalize_model_base_url(value: str) -> str:
     normalized = value.strip().rstrip("/")
     if not normalized.startswith(("http://", "https://")):
         raise ValueError("模型 base_url 必须以 http:// 或 https:// 开头")
+    return normalized
+
+
+def normalize_data_base_url(value: str) -> str:
+    """规范化并校验可信内网 muye-data 地址。"""
+    normalized = value.strip().rstrip("/")
+    try:
+        parsed = urlsplit(normalized)
+        hostname = parsed.hostname
+    except ValueError as exc:
+        raise ValueError("数据服务 base_url 必须是有效的 HTTP(S) URL") from exc
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise ValueError("数据服务 base_url 必须以 http:// 或 https:// 开头")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("数据服务 base_url 不能包含凭据")
     return normalized
 
 
@@ -102,6 +119,39 @@ class ModelConfig(BaseModel):
                 raise ValueError("OpenAI-compatible provider 必须配置模型名")
             if self.enable_thinking is not None:
                 raise ValueError("enable_thinking 仅支持 muye provider")
+        return self
+
+
+class DataConfig(BaseModel):
+    """SDK 到 muye-data 的只读 HTTP 客户端配置。
+
+    配置只包含可信服务地址和请求预算；数据库连接、物理表名与索引参数只能由
+    muye-data 部署配置持有，不能通过 Agent 或单次请求传入。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    base_url: str = Field(
+        default=DEFAULT_MUYE_DATA_BASE_URL,
+        description="muye-data 服务基础地址，只允许 HTTP(S)。",
+    )
+    timeout_seconds: float = Field(
+        default=15,
+        gt=0,
+        le=300,
+        allow_inf_nan=False,
+        description="一次完整 retrieve 请求的 HTTP 超时，单位为秒。",
+    )
+    max_retries: int = Field(
+        default=0,
+        ge=0,
+        le=1,
+        description="完整只读请求的额外重试次数；默认不重试以避免放大下游模型调用。",
+    )
+
+    @model_validator(mode="after")
+    def normalize_base_url(self) -> "DataConfig":
+        self.base_url = normalize_data_base_url(self.base_url)
         return self
 
 
@@ -246,6 +296,10 @@ class AgentConfig(BaseModel):
         default_factory=ModelConfig,
         description="内置聊天模型的连接、选择和采样配置。",
     )
+    data: DataConfig = Field(
+        default_factory=DataConfig,
+        description="按需创建的 muye-data 只读客户端配置。",
+    )
     context: ContextConfig = Field(
         default_factory=ContextConfig,
         description="按 profile 启用的短期会话上下文配置。",
@@ -290,6 +344,11 @@ class AgentConfig(BaseModel):
                 temperature=float(values.get("MUYE_SDK_MODEL_TEMPERATURE", "0.1")),
                 max_tokens=int(values.get("MUYE_SDK_MODEL_MAX_TOKENS", "4096")),
                 timeout_seconds=float(values.get("MUYE_SDK_MODEL_TIMEOUT_SECONDS", "30")),
+            ),
+            data=DataConfig(
+                base_url=values.get("MUYE_SDK_DATA_BASE_URL", DEFAULT_MUYE_DATA_BASE_URL),
+                timeout_seconds=float(values.get("MUYE_SDK_DATA_TIMEOUT_SECONDS", "15")),
+                max_retries=int(values.get("MUYE_SDK_DATA_MAX_RETRIES", "0")),
             ),
             context=ContextConfig(
                 enabled_profiles=context_profiles,

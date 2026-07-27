@@ -5,7 +5,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..config import AgentConfig
 from ..contracts import AgentCapabilities, AgentEvent, AgentMetadata, AgentRequest, AgentResult, CancelResponse, ToolCapability
@@ -16,14 +16,25 @@ from ..version import INTERNAL_PROTOCOL_VERSION, PUBLIC_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
 
+# 按需加载
+if TYPE_CHECKING:
+    from ..integrations.muye_data import DataClient
+
 
 class BaseAgent(ABC):
     """统一处理守卫、锁、取消、超时、上下文和终态结果的基础类。"""
 
-    def __init__(self, config: AgentConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: AgentConfig | None = None,
+        *,
+        data_client: DataClient | None = None,
+    ) -> None:
         self.config = config or AgentConfig.from_env()
         self._executions = ExecutionManager()
         self._checkpointers = CheckpointerManager(self.config.context)
+        self._data_client = data_client
+        self._data_client_owned_by_sdk = False
 
     @property
     @abstractmethod
@@ -158,9 +169,24 @@ class BaseAgent(ABC):
         """返回 profile 明确启用时的 LangGraph checkpointer。"""
         return await self._checkpointers.get(enabled=self._context_enabled(options))
 
+    @property
+    def data_client(self) -> "DataClient":
+        """按需返回共享数据客户端；首次访问时才创建连接资源。"""
+        if self._data_client is None:
+            from ..integrations.muye_data import DataClient
+
+            self._data_client = DataClient(self.config.data)
+            self._data_client_owned_by_sdk = True
+        return self._data_client
+
     async def aclose(self) -> None:
-        """释放 SDK 托管的上下文资源。"""
-        await self._checkpointers.close()
+        """释放 SDK 托管的上下文与按需数据客户端。"""
+        resources = [self._checkpointers.close()]
+        if self._data_client_owned_by_sdk and self._data_client is not None:
+            resources.append(self._data_client.aclose())
+        await asyncio.gather(*resources)
+        self._data_client = None
+        self._data_client_owned_by_sdk = False
 
     async def _guard(self, request: AgentRequest, options: ExecutionOptions) -> AgentResult | None:
         if not self.config.intent_guard.enabled:

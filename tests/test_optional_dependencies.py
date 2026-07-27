@@ -53,6 +53,10 @@ def test_default_install_includes_primary_modes_and_integrations() -> None:
         "openai",
         "sqlite",
     }.isdisjoint(optional_dependency_groups)
+    assert not any(
+        dependency.startswith(("pymilvus", "opensearch-py", "elasticsearch"))
+        for dependency in dependencies
+    )
 
 
 def test_model_factory_import_does_not_load_internal_http_client() -> None:

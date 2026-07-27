@@ -1,5 +1,5 @@
 """配置模型。"""
 
-from .models import AgentConfig, ApiConfig, ContextConfig, IntentGuardConfig, ModelConfig
+from .models import AgentConfig, ApiConfig, ContextConfig, DataConfig, IntentGuardConfig, ModelConfig
 
-__all__ = ["AgentConfig", "ApiConfig", "ContextConfig", "IntentGuardConfig", "ModelConfig"]
+__all__ = ["AgentConfig", "ApiConfig", "ContextConfig", "DataConfig", "IntentGuardConfig", "ModelConfig"]

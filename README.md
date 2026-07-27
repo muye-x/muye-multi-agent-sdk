@@ -14,6 +14,7 @@
 - 可选短期上下文：memory、SQLite、Postgres checkpointer，默认关闭。
 - 可选意图守卫：结构化分类无意义和违规输入，默认关闭且 fail-open。
 - 模型注入优先；内置 `muye-llm` 与 OpenAI-compatible 工厂。
+- 可选 `muye-data` 只读客户端，三种 Agent 模式均可按需召回数据。
 - ReAct 模式支持 LangChain 工具；Graph 模式支持 LangGraph 节点进度事件。
 
 
@@ -23,13 +24,13 @@
 OpenAI-compatible 模型、SQLite 上下文和 internal Agent client：
 
 ```bash
-python -m pip install 'muye-multi-agent-sdk>=1.0.0'
+python -m pip install 'muye-multi-agent-sdk>=1.1.0'
 ```
 
 Postgres 上下文后端需要额外安装对应驱动：
 
 ```bash
-python -m pip install 'muye-multi-agent-sdk[postgres]>=1.0.0'
+python -m pip install 'muye-multi-agent-sdk[postgres]>=1.1.0'
 ```
 
 `[all]` 面向源码开发和 CI，会安装所有模型与上下文后端，不建议作为生产环境的默认选择。
@@ -136,6 +137,43 @@ MUYE_SDK_CONTEXT_POSTGRES_POOL_MAX_LIFETIME_SECONDS=3600
 `MUYE_SDK_INTENT_GUARD_HISTORY_MAX_MESSAGES`、`MUYE_SDK_INTENT_GUARD_HISTORY_MAX_CHARS` 和
 `MUYE_SDK_INTENT_GUARD_HISTORY_IO_TIMEOUT_SECONDS` 调整预算。启用短期上下文的请求必须提供
 非默认 `user_id` 和 `session_id`，避免共享 checkpoint。
+
+## 按需数据召回
+
+SDK 通过 `DataClient` 调用可信内网的 `muye-data`，不直接连接 Milvus、OpenSearch 或其他
+数据库，也不提供建表、写入、更新和删除接口。数据资源、物理库表、字段映射与检索 pipeline
+均由 `muye-data` 部署配置管理；Agent 只使用逻辑 resource alias。
+
+```dotenv
+MUYE_SDK_DATA_BASE_URL=http://127.0.0.1:9840
+MUYE_SDK_DATA_TIMEOUT_SECONDS=15
+MUYE_SDK_DATA_MAX_RETRIES=0
+```
+
+Custom 与 Graph 模式可以直接调用同一个异步客户端：
+
+```python
+result = await self.data_client.retrieve(
+    resource="product_knowledge",
+    query=request.task,
+    pipeline="hybrid",
+    top_k=5,
+)
+```
+
+ReAct 模式使用固定作用域工具，resource、pipeline、过滤条件和返回字段不能由模型覆盖：
+
+```python
+from muye_multi_agent_sdk.tools import create_data_retrieval_tool
+
+tool = create_data_retrieval_tool(
+    self.data_client,
+    resource="product_knowledge",
+    pipeline="hybrid",
+    fixed_filter={"op": "eq", "field": "tenant_id", "value": "tenant-1"},
+    return_fields=["title", "source_url"],
+)
+```
 
 
 ## 验证

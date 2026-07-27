@@ -42,9 +42,9 @@ class FailingAgent(EchoAgent):
         return AgentResult.failure("UPSTREAM_FAILURE", "内部连接串错误", trace_id=request.context.trace_id)
 
 
-def test_sdk_version_is_1_0_0() -> None:
+def test_sdk_version_is_1_1_0() -> None:
     """包公共版本与构建使用的版本常量必须一致。"""
-    assert SDK_VERSION == __version__ == "1.0.0"
+    assert SDK_VERSION == __version__ == "1.1.0"
 
 
 def test_custom_agent_is_directly_invokable_without_runtime_context() -> None:
