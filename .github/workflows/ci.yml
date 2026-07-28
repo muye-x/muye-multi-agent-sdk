@@ -45,7 +45,7 @@ jobs:
       - run: python -m pip install -e '.[all,dev]'
       - run: python -m pytest -q tests
       - run: python -m pip check
-      - run: python -c "from muye_multi_agent_sdk.integrations.muye_data import DataClient; from muye_multi_agent_sdk.tools import build_data_retrieve_tool; assert DataClient and build_data_retrieve_tool"
+      - run: python -c "from muye_multi_agent_sdk.integrations.muye_data import DataClient; from muye_multi_agent_sdk.tools import create_data_retrieval_tool; assert DataClient and create_data_retrieval_tool"
       - run: python -m compileall -q src examples
       - run: python -m build --wheel .
 
