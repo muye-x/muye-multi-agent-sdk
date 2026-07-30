@@ -4,11 +4,47 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 JsonObject = dict[str, Any]
 ResultStatus = Literal["success", "error", "interrupted", "clarification_needed"]
+AGENT_ID_PATTERN = r"^agent_[a-z0-9][a-z0-9_-]{2,63}$"
+CHECKSUM_PATTERN = r"^[a-f0-9]{64}$"
+IDENTIFIER_PATTERN = r"^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+SEMVER_PATTERN = (
+    r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
+    r"(?:-(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][0-9A-Za-z-]*))"
+    r"(?:\.(?:(?:0|[1-9]\d*)|(?:\d*[A-Za-z-][0-9A-Za-z-]*)))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+
+
+class AgentIdentity(BaseModel):
+    """已部署 Agent 的稳定身份和可审计源版本。
+
+    该对象只能由已校验的 descriptor/build 输入构造。它可选地出现在 v3
+    capabilities 中，允许旧服务渐进迁移而不会把目录名或 URL 当作身份。
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    agent_id: str = Field(pattern=AGENT_ID_PATTERN)
+    agent_version: str = Field(pattern=SEMVER_PATTERN)
+    descriptor_checksum: str = Field(pattern=CHECKSUM_PATTERN)
+    source_tree_checksum: str = Field(pattern=CHECKSUM_PATTERN)
+
+
+class CitationBlock(BaseModel):
+    """知识回答可安全公开的最小引用块，不包含物理库表或检索内部参数。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    citation_id: str = Field(pattern=IDENTIFIER_PATTERN)
+    title: str = Field(min_length=1, max_length=512)
+    source: str = Field(min_length=1, max_length=2048)
+    locator: str | None = Field(default=None, max_length=1024)
+    excerpt: str | None = Field(default=None, max_length=4000)
 
 
 class AgentContext(BaseModel):
@@ -61,6 +97,7 @@ class AgentResult(BaseModel):
     prompt_data: str | None = None
     error: AgentError | None = None
     clarification_question: str | None = None
+    citations: list[CitationBlock] = Field(default_factory=list, max_length=50)
     tool_calls_made: list[str] = Field(default_factory=list)
     trace_id: str | None = None
 
@@ -72,6 +109,7 @@ class AgentResult(BaseModel):
         origin_data: JsonObject | None = None,
         prompt_data: str | None = None,
         tool_calls_made: list[str] | None = None,
+        citations: list[CitationBlock] | None = None,
         trace_id: str | None = None,
     ) -> "AgentResult":
         return cls(
@@ -79,6 +117,7 @@ class AgentResult(BaseModel):
             origin_data=origin_data,
             result_data=result_data,
             prompt_data=prompt_data,
+            citations=citations or [],
             tool_calls_made=tool_calls_made or [],
             trace_id=trace_id,
         )
@@ -139,6 +178,14 @@ class AgentMetadata(BaseModel):
     version: str = Field(min_length=1, max_length=40)
     description: str = Field(min_length=1, max_length=500)
     supported_intents: list[str] = Field(default_factory=list)
+    identity: AgentIdentity | None = None
+
+    @model_validator(mode="after")
+    def validate_identity_version(self) -> "AgentMetadata":
+        """防止 capabilities 把一个构建版本冒充为另一个已部署版本。"""
+        if self.identity is not None and self.identity.agent_version != self.version:
+            raise ValueError("identity.agent_version 必须与 AgentMetadata.version 一致")
+        return self
 
 
 class ToolCapability(BaseModel):
@@ -162,6 +209,26 @@ class AgentCapabilities(BaseModel):
     max_task_length: int = 2000
     internal_protocol_version: str
     public_protocol_version: str | None = None
+    identity: AgentIdentity | None = None
+    features: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("features")
+    @classmethod
+    def validate_features(cls, values: list[str]) -> list[str]:
+        """能力名称必须稳定、去重，避免调用方依据非结构化文本协商协议。"""
+        normalized = [value.strip() for value in values]
+        if any(not value or len(value) > 128 for value in normalized):
+            raise ValueError("features 的每一项必须是 1 至 128 个字符")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("features 不能重复")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_identity_version(self) -> "AgentCapabilities":
+        """确保协商到的版本与可审计部署身份来自同一构建。"""
+        if self.identity is not None and self.identity.agent_version != self.version:
+            raise ValueError("identity.agent_version 必须与 capabilities.version 一致")
+        return self
 
 
 class CancelRequest(BaseModel):

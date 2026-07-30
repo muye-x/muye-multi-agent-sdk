@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
+import pytest
 
 from muye_multi_agent_sdk import (
     AgentConfig,
+    AgentCapabilities,
+    AgentIdentity,
     ContextConfig,
     AgentMetadata,
     AgentRequest,
@@ -42,9 +46,27 @@ class FailingAgent(EchoAgent):
         return AgentResult.failure("UPSTREAM_FAILURE", "内部连接串错误", trace_id=request.context.trace_id)
 
 
-def test_sdk_version_is_1_1_0() -> None:
+class IdentifiedAgent(EchoAgent):
+    """携带 v2 部署身份的最小 Agent。"""
+
+    @property
+    def metadata(self) -> AgentMetadata:
+        return AgentMetadata(
+            name="identified-agent",
+            version="1.0.0",
+            description="身份测试",
+            identity=AgentIdentity(
+                agent_id="agent_product_handbook",
+                agent_version="1.0.0",
+                descriptor_checksum="a" * 64,
+                source_tree_checksum="b" * 64,
+            ),
+        )
+
+
+def test_sdk_version_is_2_0_0() -> None:
     """包公共版本与构建使用的版本常量必须一致。"""
-    assert SDK_VERSION == __version__ == "1.1.0"
+    assert SDK_VERSION == __version__ == "2.0.0"
 
 
 def test_custom_agent_is_directly_invokable_without_runtime_context() -> None:
@@ -97,6 +119,59 @@ def test_capabilities_declares_one_consistent_protocol_version() -> None:
 
     assert response.status_code == 200
     assert response.json()["internal_protocol_version"] == "muye-agent-internal/3.0"
+
+
+def test_ready_endpoint_declares_initialized_sdk_transport() -> None:
+    response = asyncio.run(_get(create_app(EchoAgent()), "/ready"))
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["agent"] == "echo-agent"
+
+
+def test_capabilities_expose_optional_v2_identity_and_features() -> None:
+    response = asyncio.run(_get(create_app(IdentifiedAgent()), "/capabilities"))
+
+    assert response.json()["identity"]["agent_id"] == "agent_product_handbook"
+    assert set(response.json()["features"]) == {"cancel", "citation_blocks", "sse", "trusted_deadline"}
+
+
+def test_identity_version_must_match_metadata_and_capabilities() -> None:
+    identity = AgentIdentity(
+        agent_id="agent_product_handbook",
+        agent_version="1.0.0",
+        descriptor_checksum="a" * 64,
+        source_tree_checksum="b" * 64,
+    )
+
+    with pytest.raises(ValueError, match="identity.agent_version"):
+        AgentMetadata(name="test", version="2.0.0", description="test", identity=identity)
+    with pytest.raises(ValueError, match="identity.agent_version"):
+        AgentCapabilities(
+            agent_name="test",
+            version="2.0.0",
+            description="test",
+            internal_protocol_version="muye-agent-internal/3.0",
+            identity=identity,
+        )
+
+
+def test_internal_verifier_protects_capabilities_and_trusted_deadline() -> None:
+    def verifier(request: object) -> bool:
+        return getattr(request, "headers").get("authorization") == "Bearer test-service-token"
+
+    app = create_app(EchoAgent(), internal_request_verifier=verifier)
+    unauthorized = asyncio.run(_get(app, "/capabilities"))
+    assert unauthorized.status_code == 401
+
+    headers = {
+        "Authorization": "Bearer test-service-token",
+        "X-Muye-Deadline-Unix-Ms": str(int((time.time() - 1) * 1000)),
+    }
+    response = asyncio.run(_post(app, "/invoke", {"task": "测试"}, headers=headers))
+
+    assert response.status_code == 200
+    assert response.json()["error"]["code"] == "DEADLINE_EXCEEDED"
 
 
 def test_cors_is_disabled_by_default() -> None:
@@ -159,10 +234,16 @@ def test_context_enabled_internal_request_requires_explicit_identity() -> None:
     assert response.json()["error"]["code"] == "CONTEXT_IDENTITY_REQUIRED"
 
 
-async def _post(app: object, path: str, payload: dict[str, object]) -> httpx.Response:
+async def _post(
+    app: object,
+    path: str,
+    payload: dict[str, object],
+    *,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
     """通过 ASGI transport 调用路由，避免同步 TestClient 的版本耦合。"""
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-        return await client.post(path, json=payload)
+        return await client.post(path, json=payload, headers=headers)
 
 
 async def _get(

@@ -3,6 +3,7 @@
 from .client import DataClient
 from .errors import DataClientError
 from .models import (
+    DataAccessContext,
     FilterExpression,
     PipelineCapability,
     ResourceCapabilities,
@@ -14,6 +15,7 @@ from .models import (
 __all__ = [
     "DataClient",
     "DataClientError",
+    "DataAccessContext",
     "FilterExpression",
     "PipelineCapability",
     "ResourceCapabilities",

@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
-from muye_multi_agent_sdk import AgentRequest
+from muye_multi_agent_sdk import AgentIdentity, AgentRequest
 from muye_multi_agent_sdk.integrations import InternalAgentClient, InternalAgentClientError
 
 
@@ -68,5 +70,105 @@ def test_invoke_and_cancel_validate_standard_responses() -> None:
 
 
 def test_stream_rejects_invalid_capabilities() -> None:
-    with pytest.raises(InternalAgentClientError, match="internal v3"):
+    with pytest.raises(InternalAgentClientError, match="协议版本"):
         InternalAgentClient.validate_capabilities({"api_profiles": ["internal"]}, require_streaming=True)
+
+
+def test_invoke_requires_expected_identity_and_rejects_expired_deadline() -> None:
+    expected_identity = AgentIdentity(
+        agent_id="agent_product_handbook",
+        agent_version="1.0.0",
+        descriptor_checksum="a" * 64,
+        source_tree_checksum="b" * 64,
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/capabilities":
+            return httpx.Response(
+                200,
+                json={
+                    "internal_protocol_version": "muye-agent-internal/3.0",
+                    "api_profiles": ["internal"],
+                    "supports_streaming": True,
+                    "identity": expected_identity.model_dump(mode="json"),
+                },
+            )
+        return httpx.Response(200, json={"status": "success", "payload": {"result_data": {"markdown": "ok"}}})
+
+    client = InternalAgentClient(_client_factory(handler))
+    result = asyncio.run(
+        client.invoke(
+            base_url="http://knowledge.test",
+            timeout_seconds=2,
+            request=AgentRequest(task="退款"),
+            expected_identity=expected_identity,
+        )
+    )
+    assert result["status"] == "success"
+
+    with pytest.raises(InternalAgentClientError, match="deadline"):
+        asyncio.run(
+            client.invoke(
+                base_url="http://knowledge.test",
+                timeout_seconds=2,
+                request=AgentRequest(task="退款"),
+                deadline_monotonic=time.monotonic() - 1,
+            )
+        )
+
+
+def test_client_forwards_service_token_and_cross_process_deadline() -> None:
+    received_headers: dict[str, dict[str, str]] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        received_headers[request.url.path] = dict(request.headers)
+        if request.url.path == "/capabilities":
+            return httpx.Response(
+                200,
+                json={
+                    "internal_protocol_version": "muye-agent-internal/3.0",
+                    "api_profiles": ["internal"],
+                    "supports_streaming": True,
+                    "features": ["trusted_deadline"],
+                },
+            )
+        return httpx.Response(200, json={"status": "success", "payload": {"result_data": {"markdown": "ok"}}})
+
+    result = asyncio.run(
+        InternalAgentClient(_client_factory(handler)).invoke(
+            base_url="http://knowledge.test",
+            timeout_seconds=2,
+            request=AgentRequest(task="退款"),
+            deadline_monotonic=time.monotonic() + 5,
+            service_token=SecretStr("test-service-token"),
+        )
+    )
+
+    assert result["status"] == "success"
+    for headers in received_headers.values():
+        assert headers["authorization"] == "Bearer test-service-token"
+        assert int(headers["x-muye-deadline-unix-ms"]) > int(time.time() * 1000)
+
+
+def test_capabilities_reject_unexpected_protocol_profile_or_deadline_feature() -> None:
+    valid = {
+        "internal_protocol_version": "muye-agent-internal/3.0",
+        "api_profiles": ["internal"],
+        "supports_streaming": True,
+        "features": ["trusted_deadline"],
+    }
+
+    with pytest.raises(InternalAgentClientError, match="协议版本"):
+        InternalAgentClient.validate_capabilities(
+            valid,
+            require_streaming=False,
+            expected_protocol_version="muye-agent-internal/3.1",
+        )
+    with pytest.raises(InternalAgentClientError, match="预期 API profile"):
+        InternalAgentClient.validate_capabilities(valid, require_streaming=False, expected_profile="public")
+    with pytest.raises(InternalAgentClientError, match="所需能力"):
+        InternalAgentClient.validate_capabilities(
+            {**valid, "features": []},
+            require_streaming=False,
+            required_features={"trusted_deadline"},
+        )

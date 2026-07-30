@@ -9,8 +9,9 @@ import pytest
 from pydantic import ValidationError
 
 from muye_multi_agent_sdk.integrations import DataClientError
-from muye_multi_agent_sdk.integrations.muye_data import RetrievalHit, RetrievalResponse
-from muye_multi_agent_sdk.tools import create_data_retrieval_tool
+from muye_multi_agent_sdk import AgentIdentity
+from muye_multi_agent_sdk.integrations.muye_data import DataAccessContext, RetrievalHit, RetrievalResponse
+from muye_multi_agent_sdk.tools import create_data_retrieval_tool, create_scoped_data_retrieval_tool
 
 
 class _FakeClient:
@@ -115,3 +116,53 @@ def test_tool_validates_fixed_scope_when_created() -> None:
 
     with pytest.raises(ValidationError):
         create_data_retrieval_tool(client, resource="invalid resource")  # type: ignore[arg-type]
+
+
+def test_scoped_tool_forwards_trusted_access_context_and_returns_citations() -> None:
+    response = RetrievalResponse(
+        resource="docs",
+        pipeline="hybrid",
+        trace_id="trace-1",
+        took_ms=2,
+        partial=False,
+        warnings=[],
+        hits=[
+            RetrievalHit(
+                id="1",
+                content="退款在十四天内可办理。",
+                score=0.9,
+                fields={"citation_id": "citation-refund", "title": "退款政策", "source": "handbook.md#refund"},
+            )
+        ],
+    )
+    client = _FakeClient(response)
+    access_context = DataAccessContext(
+        service_id="agent-service",
+        deployment_id="deploy-handbook-v1",
+        agent=AgentIdentity(
+            agent_id="agent_product_handbook",
+            agent_version="1.0.0",
+            descriptor_checksum="a" * 64,
+            source_tree_checksum="b" * 64,
+        ),
+    )
+    tool = create_scoped_data_retrieval_tool(
+        client,  # type: ignore[arg-type]
+        access_context=access_context,
+        resource="docs",
+        fixed_filter={"op": "eq", "field": "knowledge_id", "value": "kb.product_handbook"},
+        return_fields=["citation_id", "title", "source"],
+    )
+
+    result = asyncio.run(tool.ainvoke({"query": "退款"}))
+
+    assert client.calls[0]["access_context"] == access_context
+    assert result["citations"] == [
+        {
+            "citation_id": "citation-refund",
+            "title": "退款政策",
+            "source": "handbook.md#refund",
+            "locator": None,
+            "excerpt": "退款在十四天内可办理。",
+        }
+    ]

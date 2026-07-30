@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
@@ -64,7 +65,14 @@ class BaseAgent(ABC):
             api_profiles=profiles,
             internal_protocol_version=INTERNAL_PROTOCOL_VERSION,
             public_protocol_version=PUBLIC_PROTOCOL_VERSION if "public" in profiles else None,
+            identity=metadata.identity,
+            features=self.features,
         )
+
+    @property
+    def features(self) -> list[str]:
+        """返回可由 trusted caller 用于协议协商的稳定运行时能力。"""
+        return ["cancel", "citation_blocks", "sse", "trusted_deadline"]
 
     async def invoke(
         self,
@@ -77,18 +85,23 @@ class BaseAgent(ABC):
         identity_error = self._context_identity_error(request, options)
         if identity_error is not None:
             return identity_error
+        started_at = time.monotonic()
+        timeout_seconds = self._execution_timeout_seconds(options, started_at)
+        if timeout_seconds is None:
+            return self._deadline_exceeded_result(request)
         try:
-            async with self._executions.acquire(self.metadata.name, request, options):
-                guarded = await self._guard(request, options)
-                if guarded is not None:
-                    return guarded
-                return await asyncio.wait_for(self.execute(request, options=options), self.config.request_timeout_seconds)
+            async with asyncio.timeout(timeout_seconds):
+                async with self._executions.acquire(self.metadata.name, request, options):
+                    guarded = await self._guard(request, options)
+                    if guarded is not None:
+                        return guarded
+                    return await self.execute(request, options=options)
         except SessionBusyError as exc:
             return AgentResult.interrupted("SESSION_BUSY", str(exc), recoverable=True, trace_id=request.context.trace_id)
         except asyncio.CancelledError:
             return AgentResult.interrupted("USER_CANCELLED", "当前任务已终止。", recoverable=True, trace_id=request.context.trace_id)
         except TimeoutError:
-            return AgentResult.failure("REQUEST_TIMEOUT", "Agent 请求超时。", recoverable=True, trace_id=request.context.trace_id)
+            return self._timeout_result(request, options)
         except Exception as exc:
             logger.exception(
                 "Agent invoke failed agent=%s profile=%s trace_id=%s error_type=%s",
@@ -111,13 +124,18 @@ class BaseAgent(ABC):
         if identity_error is not None:
             yield AgentEvent.completed(identity_error)
             return
+        started_at = time.monotonic()
+        timeout_seconds = self._execution_timeout_seconds(options, started_at)
+        if timeout_seconds is None:
+            yield AgentEvent.completed(self._deadline_exceeded_result(request))
+            return
         try:
-            async with self._executions.acquire(self.metadata.name, request, options):
-                guarded = await self._guard(request, options)
-                if guarded is not None:
-                    yield AgentEvent.completed(guarded)
-                    return
-                async with asyncio.timeout(self.config.request_timeout_seconds):
+            async with asyncio.timeout(timeout_seconds):
+                async with self._executions.acquire(self.metadata.name, request, options):
+                    guarded = await self._guard(request, options)
+                    if guarded is not None:
+                        yield AgentEvent.completed(guarded)
+                        return
                     emitted_terminal = False
                     async for event in self.stream_events(request, options=options):
                         emitted_terminal = emitted_terminal or event.kind == "result"
@@ -129,7 +147,7 @@ class BaseAgent(ABC):
         except asyncio.CancelledError:
             yield AgentEvent.completed(AgentResult.interrupted("USER_CANCELLED", "当前任务已终止。", recoverable=True, trace_id=request.context.trace_id))
         except TimeoutError:
-            yield AgentEvent.completed(AgentResult.failure("REQUEST_TIMEOUT", "Agent 请求超时。", recoverable=True, trace_id=request.context.trace_id))
+            yield AgentEvent.completed(self._timeout_result(request, options))
         except Exception as exc:
             logger.exception(
                 "Agent stream failed agent=%s profile=%s trace_id=%s error_type=%s",
@@ -237,6 +255,39 @@ class BaseAgent(ABC):
 
     def _context_enabled(self, options: ExecutionOptions) -> bool:
         return options.context_enabled and options.profile in self.config.context.enabled_profiles
+
+    def _execution_timeout_seconds(self, options: ExecutionOptions, started_at: float) -> float | None:
+        """取整个 SDK 请求预算与 trusted caller deadline 的较小值。"""
+        request_deadline = started_at + self.config.request_timeout_seconds
+        effective_deadline = min(
+            request_deadline,
+            options.deadline_monotonic if options.deadline_monotonic is not None else request_deadline,
+        )
+        remaining = effective_deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        return remaining
+
+    @staticmethod
+    def _deadline_exceeded_result(request: AgentRequest) -> AgentResult:
+        """返回 deadline 已耗尽的可分类错误，避免误报为模型或工具故障。"""
+        return AgentResult.failure(
+            "DEADLINE_EXCEEDED",
+            "请求已超过调用方设置的 deadline。",
+            recoverable=True,
+            trace_id=request.context.trace_id,
+        )
+
+    def _timeout_result(self, request: AgentRequest, options: ExecutionOptions) -> AgentResult:
+        """区分调用方 deadline 与 SDK 自身请求预算，便于上游决定是否重试。"""
+        if options.deadline_monotonic is not None and options.deadline_monotonic <= time.monotonic():
+            return self._deadline_exceeded_result(request)
+        return AgentResult.failure(
+            "REQUEST_TIMEOUT",
+            "Agent 请求超时。",
+            recoverable=True,
+            trace_id=request.context.trace_id,
+        )
 
     def _context_identity_error(self, request: AgentRequest, options: ExecutionOptions) -> AgentResult | None:
         if not self._context_enabled(options):

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 from ...config import DataConfig
 from .errors import DataClientError
 from .models import (
+    DataAccessContext,
     ErrorResponse,
     FilterExpression,
     ResourceCapabilities,
@@ -53,6 +54,7 @@ class DataClient:
         filter: FilterExpression | dict[str, Any] | None = None,
         return_fields: list[str] | None = None,
         trace_id: str = "",
+        access_context: DataAccessContext | None = None,
     ) -> RetrievalResponse:
         """执行完整召回；参数在发起网络请求前按 v1 契约校验。"""
         request = RetrievalRequest.model_validate(
@@ -71,16 +73,24 @@ class DataClient:
             "/api/v1/retrieve",
             json=request.model_dump(exclude_none=True),
             trace_id=request.trace_id,
+            access_context=access_context,
         )
         return self._parse_data(payload, RetrievalResponse, trace_id=request.trace_id)
 
-    async def capabilities(self, resource: str, *, trace_id: str = "") -> ResourceCapabilities:
+    async def capabilities(
+        self,
+        resource: str,
+        *,
+        trace_id: str = "",
+        access_context: DataAccessContext | None = None,
+    ) -> ResourceCapabilities:
         """读取已知资源能力；resource 仍按逻辑别名校验。"""
         validated = RetrievalRequest(resource=resource, query="capabilities", trace_id=trace_id)
         payload = await self._request(
             "GET",
             f"/api/v1/resources/{validated.resource}/capabilities",
             trace_id=validated.trace_id,
+            access_context=access_context,
         )
         return self._parse_data(payload, ResourceCapabilities, trace_id=trace_id)
 
@@ -91,6 +101,7 @@ class DataClient:
         *,
         json: dict[str, Any] | None = None,
         trace_id: str = "",
+        access_context: DataAccessContext | None = None,
     ) -> dict[str, Any]:
         client = self._http_client()
         last_error: DataClientError | None = None
@@ -99,6 +110,8 @@ class DataClient:
                 headers = {"Accept": "application/json"}
                 if trace_id:
                     headers["X-Trace-Id"] = trace_id
+                if access_context is not None:
+                    headers.update(self._access_context_headers(access_context))
                 response = await client.request(
                     method,
                     path,
@@ -151,6 +164,18 @@ class DataClient:
             last_error.recoverable,
         )
         raise last_error
+
+    @staticmethod
+    def _access_context_headers(access_context: DataAccessContext) -> dict[str, str]:
+        """投影可信访问身份，避免把物理库表或策略细节交给 Agent。"""
+        return {
+            "X-Muye-Service-Id": access_context.service_id,
+            "X-Muye-Deployment-Id": access_context.deployment_id,
+            "X-Muye-Agent-Id": access_context.agent.agent_id,
+            "X-Muye-Agent-Version": access_context.agent.agent_version,
+            "X-Muye-Descriptor-Checksum": access_context.agent.descriptor_checksum,
+            "X-Muye-Source-Checksum": access_context.agent.source_tree_checksum,
+        }
 
     def _http_client(self) -> httpx.AsyncClient:
         if self._client is None:
