@@ -18,7 +18,8 @@ from muye_multi_agent_sdk import (
 )
 from muye_multi_agent_sdk.integrations import DataClient, DataClientError
 from muye_multi_agent_sdk.integrations import muye_data as muye_data_integration
-from muye_multi_agent_sdk.integrations.muye_data import RetrievalRequest
+from muye_multi_agent_sdk.integrations.muye_data import DataAccessContext, RetrievalRequest
+from muye_multi_agent_sdk import AgentIdentity
 
 
 def _client(handler: Any, *, max_retries: int = 0) -> tuple[DataClient, httpx.AsyncClient]:
@@ -225,6 +226,44 @@ def test_capabilities_sends_trace_header_and_timeout_preserves_trace() -> None:
         )
     assert exc_info.value.trace_id == "trace-timeout"
     asyncio.run(timeout_http_client.aclose())
+
+
+def test_retrieve_forwards_only_trusted_access_context_headers() -> None:
+    access_context = DataAccessContext(
+        service_id="agent-service",
+        deployment_id="deploy-handbook-v1",
+        agent=AgentIdentity(
+            agent_id="agent_product_handbook",
+            agent_version="1.0.0",
+            descriptor_checksum="a" * 64,
+            source_tree_checksum="b" * 64,
+        ),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["X-Muye-Service-Id"] == "agent-service"
+        assert request.headers["X-Muye-Deployment-Id"] == "deploy-handbook-v1"
+        assert request.headers["X-Muye-Agent-Id"] == "agent_product_handbook"
+        assert request.headers["X-Muye-Agent-Version"] == "1.0.0"
+        assert request.headers["X-Muye-Descriptor-Checksum"] == "a" * 64
+        assert request.headers["X-Muye-Source-Checksum"] == "b" * 64
+        assert "access_context" not in __import__("json").loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "resource": "docs",
+                "pipeline": "hybrid",
+                "trace_id": "",
+                "took_ms": 1,
+                "partial": False,
+                "warnings": [],
+                "hits": [],
+            },
+        )
+
+    client, http_client = _client(handler)
+    asyncio.run(client.retrieve(resource="docs", query="refund", access_context=access_context))
+    asyncio.run(http_client.aclose())
 
 
 def test_sdk_filter_contract_matches_service_budgets() -> None:

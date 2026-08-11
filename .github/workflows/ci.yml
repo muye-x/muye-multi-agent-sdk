@@ -3,7 +3,7 @@ name: verify
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, v2.0.x-dev]
 
 permissions:
   contents: read
@@ -19,6 +19,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -45,9 +47,19 @@ jobs:
       - run: python -m pip install -e '.[all,dev]'
       - run: python -m pytest -q tests
       - run: python -m pip check
-      - run: python -c "from muye_multi_agent_sdk.integrations.muye_data import DataClient; from muye_multi_agent_sdk.tools import create_data_retrieval_tool; assert DataClient and create_data_retrieval_tool"
       - run: python -m compileall -q src examples
       - run: python -m build --wheel .
+      - name: Verify clean wheel with the independent template fixture
+        run: |
+          python -m venv /tmp/muye-sdk-wheel-fixture
+          /tmp/muye-sdk-wheel-fixture/bin/python -m pip install --upgrade pip
+          /tmp/muye-sdk-wheel-fixture/bin/python -m pip install dist/*.whl
+          cd tests/fixtures/react_knowledge_agent
+          MUYE_AGENT_SERVICE_ID=fixture-service \
+          MUYE_AGENT_DEPLOYMENT_ID=fixture-deployment \
+          MUYE_AGENT_DESCRIPTOR_CHECKSUM=$(printf 'a%.0s' {1..64}) \
+          MUYE_AGENT_SOURCE_TREE_CHECKSUM=$(printf 'b%.0s' {1..64}) \
+          /tmp/muye-sdk-wheel-fixture/bin/python verify_wheel_install.py
 
   workspace-hygiene:
     runs-on: ubuntu-latest

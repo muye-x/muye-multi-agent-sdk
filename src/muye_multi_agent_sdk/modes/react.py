@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from abc import abstractmethod
 from collections.abc import AsyncIterator
@@ -9,11 +10,11 @@ from inspect import isawaitable
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 
 from ..config import AgentConfig
-from ..contracts import AgentEvent, AgentRequest, AgentResult, ToolCapability
+from ..contracts import AgentEvent, AgentRequest, AgentResult, CitationBlock, ToolCapability
 from ..integrations.factory import build_chat_model
 from ..runtime import ExecutionOptions
 from ..safety import GuardContext, GuardHistoryMessage
@@ -219,7 +220,51 @@ class ReActAgent(BaseAgent):
         if not text:
             return AgentResult.failure("EMPTY_RESULT", "ReAct Agent 未返回可展示结果。", recoverable=True, trace_id=request.context.trace_id)
         tool_names = [str(getattr(message, "name", "")) for message in messages if getattr(message, "type", "") == "tool"]
-        return AgentResult.success({"markdown": text}, tool_calls_made=[name for name in tool_names if name], trace_id=request.context.trace_id)
+        return AgentResult.success(
+            {"markdown": text},
+            citations=self._citations_from_tool_messages(messages),
+            tool_calls_made=[name for name in tool_names if name],
+            trace_id=request.context.trace_id,
+        )
+
+    @staticmethod
+    def _citations_from_tool_messages(messages: list[Any]) -> list[CitationBlock]:
+        """只从实际工具消息提取 retrieval 引用，忽略模型文本中的伪造字段。"""
+        citations: list[CitationBlock] = []
+        seen_ids: set[str] = set()
+        for message in messages:
+            if not isinstance(message, ToolMessage):
+                continue
+            payload = ReActAgent._tool_payload(message.content)
+            raw_citations = payload.get("citations") if payload is not None else None
+            if not isinstance(raw_citations, list):
+                continue
+            for raw_citation in raw_citations:
+                try:
+                    citation = CitationBlock.model_validate(raw_citation)
+                except Exception:
+                    logger.warning("Ignoring invalid citation returned by tool name=%s", message.name)
+                    continue
+                if citation.citation_id in seen_ids:
+                    continue
+                citations.append(citation)
+                seen_ids.add(citation.citation_id)
+                if len(citations) == 50:
+                    return citations
+        return citations
+
+    @staticmethod
+    def _tool_payload(content: object) -> dict[str, Any] | None:
+        """兼容 LangChain 工具消息的 JSON 字符串和结构化 content。"""
+        if isinstance(content, dict):
+            return content
+        if not isinstance(content, str):
+            return None
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
 
     async def stream_events(self, request: AgentRequest, *, options: ExecutionOptions) -> AsyncIterator[AgentEvent]:
         """先投影工具生命周期，再以统一终态结果收尾。"""

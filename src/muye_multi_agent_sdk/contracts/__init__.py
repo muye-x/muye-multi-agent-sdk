@@ -2,6 +2,7 @@
 
 from .events import AgentEvent
 from .models import (
+    AgentIdentity,
     AgentCapabilities,
     AgentContext,
     AgentError,
@@ -10,10 +11,12 @@ from .models import (
     AgentResult,
     CancelRequest,
     CancelResponse,
+    CitationBlock,
     ToolCapability,
 )
 
 __all__ = [
-    "AgentCapabilities", "AgentContext", "AgentError", "AgentEvent", "AgentMetadata",
-    "AgentRequest", "AgentResult", "CancelRequest", "CancelResponse", "ToolCapability",
+    "AgentCapabilities", "AgentContext", "AgentError", "AgentEvent", "AgentIdentity",
+    "AgentMetadata", "AgentRequest", "AgentResult", "CancelRequest", "CancelResponse",
+    "CitationBlock", "ToolCapability",
 ]

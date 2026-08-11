@@ -49,6 +49,7 @@ class ExecutionOptions:
     wait_timeout_seconds: float | None = None
     idle_timeout_seconds: float | None = None
     max_hold_timeout_seconds: float | None = None
+    deadline_monotonic: float | None = None
 
 
 @dataclass(slots=True)

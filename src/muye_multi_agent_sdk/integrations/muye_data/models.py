@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ...contracts import AgentIdentity
 
 RESOURCE_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
 TRACE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
@@ -21,6 +22,21 @@ class StrictModel(BaseModel):
     """拒绝未知字段与边界处的隐式类型转换。"""
 
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class DataAccessContext(StrictModel):
+    """由可信部署配置注入的 Agent 到数据服务访问身份。
+
+    模型和用户请求都不能构造或修改该对象。SDK 将它作为 internal 请求的声明性
+    header 发送；muye-data 在后续阶段会结合服务认证与 deployment policy 执行
+    最终授权，不能只信任这些 header。
+    """
+
+    service_id: str = Field(pattern=RESOURCE_NAME_PATTERN)
+    deployment_id: str = Field(pattern=RESOURCE_NAME_PATTERN)
+    agent: AgentIdentity
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
 class FilterExpression(StrictModel):

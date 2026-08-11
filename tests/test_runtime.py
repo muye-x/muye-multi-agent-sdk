@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from contextlib import AsyncExitStack
 from types import SimpleNamespace
 
@@ -160,6 +161,21 @@ def test_execution_manager_releases_idle_session_lock() -> None:
 
     assert manager._active == {}
     assert manager._locks == {}
+
+
+def test_agent_rejects_expired_trusted_deadline_before_execution() -> None:
+    agent = SlowAgent()
+
+    result = asyncio.run(
+        agent.invoke(
+            AgentRequest(task="test"),
+            options=ExecutionOptions(deadline_monotonic=time.monotonic() - 1),
+        )
+    )
+
+    assert result.status == "error"
+    assert result.error is not None
+    assert result.error.code == "DEADLINE_EXCEEDED"
 
 
 def test_execution_manager_keeps_default_fail_fast_behavior() -> None:
