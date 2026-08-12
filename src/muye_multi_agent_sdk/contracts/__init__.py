@@ -12,11 +12,14 @@ from .models import (
     CancelRequest,
     CancelResponse,
     CitationBlock,
+    ChannelInvokeRequest,
+    ChannelInvokeResponse,
+    ChannelTextMessage,
     ToolCapability,
 )
 
 __all__ = [
     "AgentCapabilities", "AgentContext", "AgentError", "AgentEvent", "AgentIdentity",
     "AgentMetadata", "AgentRequest", "AgentResult", "CancelRequest", "CancelResponse",
-    "CitationBlock", "ToolCapability",
+    "CitationBlock", "ChannelInvokeRequest", "ChannelInvokeResponse", "ChannelTextMessage", "ToolCapability",
 ]

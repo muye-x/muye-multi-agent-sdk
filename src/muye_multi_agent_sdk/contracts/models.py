@@ -77,6 +77,51 @@ class AgentRequest(BaseModel):
         return self
 
 
+class ChannelTextMessage(BaseModel):
+    """第三方通道可安全传递给 Agent 的文本消息。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    type: Literal["text"] = "text"
+    content: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("channel message content 不能为空")
+        return normalized
+
+
+class ChannelInvokeRequest(BaseModel):
+    """受信任通道服务到 Agent 的标准化调用。
+
+    ``user_id`` 必须由经过认证的通道服务派生。上游 provider 的凭据、原始用户
+    标识和消息关联令牌不属于该契约，避免进入 Agent 上下文或记忆后端。
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    channel: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    user_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
+    session_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
+    trace_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{7,127}$")
+    message_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
+    message: ChannelTextMessage
+
+
+class ChannelInvokeResponse(BaseModel):
+    """Agent 对通道服务的最小文本响应，不包含内部执行数据。"""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    status: ResultStatus
+    trace_id: str
+    message: ChannelTextMessage | None = None
+    error: AgentError | None = None
+
+
 class AgentError(BaseModel):
     """面向调用方的结构化错误。"""
 
@@ -84,6 +129,9 @@ class AgentError(BaseModel):
     message: str
     recoverable: bool = False
     retry_suggestion: str | None = None
+
+
+ChannelInvokeResponse.model_rebuild()
 
 
 class AgentResult(BaseModel):

@@ -16,6 +16,7 @@
 - 模型注入优先；内置 `muye-llm` 与 OpenAI-compatible 工厂。
 - 可选 `muye-data` 只读客户端，三种 Agent 模式均可按需召回数据。
 - ReAct 模式支持 LangChain 工具；Graph 模式支持 LangGraph 节点进度事件。
+- v2.1 提供可选 Channel endpoint 与 `ChannelAgentClient`，供微信等第三方通道以受认证的标准文本契约调用 Agent。
 
 
 ## 安装
@@ -24,13 +25,13 @@
 OpenAI-compatible 模型、SQLite 上下文和 internal Agent client：
 
 ```bash
-python -m pip install 'muye-multi-agent-sdk>=1.1.0'
+python -m pip install 'muye-multi-agent-sdk>=2.1.0'
 ```
 
 Postgres 上下文后端需要额外安装对应驱动：
 
 ```bash
-python -m pip install 'muye-multi-agent-sdk[postgres]>=1.1.0'
+python -m pip install 'muye-multi-agent-sdk[postgres]>=2.1.0'
 ```
 
 `[all]` 面向源码开发和 CI，会安装所有模型与上下文后端，不建议作为生产环境的默认选择。
