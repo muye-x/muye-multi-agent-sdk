@@ -1,6 +1,7 @@
 """第三方通道服务调用 Agent 的受认证 HTTP 客户端。"""
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import httpx
@@ -27,6 +28,8 @@ class ChannelAgentClient:
         self._token = token.strip()
         if not self._base_url.startswith(("http://", "https://")) or not self._token:
             raise ValueError("Channel Agent client 必须配置 HTTP(S) 地址和服务凭据")
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("Channel Agent client timeout_seconds 必须是有限正数")
         self._timeout_seconds = timeout_seconds
         self._client = client
         self._owns_client = client is None

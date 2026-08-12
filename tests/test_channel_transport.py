@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 
 import httpx
 
@@ -14,6 +15,16 @@ from muye_multi_agent_sdk import (
     CustomAgent,
     create_app,
 )
+from muye_multi_agent_sdk.integrations import (
+    ChannelAgentClient,
+    ChannelAgentClientError,
+    DataClient,
+    DataClientError,
+    InternalAgentClient,
+    InternalAgentClientError,
+    build_chat_model,
+)
+import muye_multi_agent_sdk.integrations as integrations
 
 
 class ChannelTestAgent(CustomAgent):
@@ -68,3 +79,32 @@ def test_channel_endpoint_rejects_invalid_service_token_before_execution() -> No
 
     assert response.status_code == 401
     assert agent.request is None
+
+
+def test_integrations_exports_preserve_existing_public_api() -> None:
+    assert {
+        "DataClient",
+        "DataClientError",
+        "InternalAgentClient",
+        "InternalAgentClientError",
+        "build_chat_model",
+        "ChannelAgentClient",
+        "ChannelAgentClientError",
+    }.issubset(set(integrations.__all__))
+    assert ChannelAgentClient is not None
+    assert ChannelAgentClientError is not None
+    assert DataClient is not None
+    assert DataClientError is not None
+    assert InternalAgentClient is not None
+    assert InternalAgentClientError is not None
+    assert build_chat_model is not None
+
+
+def test_channel_client_rejects_invalid_timeout() -> None:
+    for timeout in (0, -1, math.inf, math.nan):
+        try:
+            ChannelAgentClient("https://agent.example", "token", timeout_seconds=timeout)
+        except ValueError as exc:
+            assert "有限正数" in str(exc)
+        else:
+            raise AssertionError(f"timeout {timeout!r} should be rejected")

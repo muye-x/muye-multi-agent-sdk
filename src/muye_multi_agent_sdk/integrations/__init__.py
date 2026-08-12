@@ -42,4 +42,4 @@ __all__ = [
 ]
 from .channel import ChannelAgentClient, ChannelAgentClientError
 
-__all__ = ["ChannelAgentClient", "ChannelAgentClientError"]
+__all__ += ["ChannelAgentClient", "ChannelAgentClientError"]

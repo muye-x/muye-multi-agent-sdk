@@ -119,7 +119,7 @@ class ChannelInvokeResponse(BaseModel):
     status: ResultStatus
     trace_id: str
     message: ChannelTextMessage | None = None
-    error: "AgentError" | None = None
+    error: AgentError | None = None
 
 
 class AgentError(BaseModel):
