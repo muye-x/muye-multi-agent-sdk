@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from ..contracts import AgentContext, AgentRequest, AgentResult, CancelRequest
+from ..contracts import AgentContext, AgentRequest, AgentResult, CancelRequest, ChannelInvokeRequest, ChannelInvokeResponse, ChannelTextMessage
 from ..modes import BaseAgent
 from ..runtime import ExecutionOptions
 from ..version import SDK_VERSION
@@ -20,6 +20,7 @@ from .sse import SseEmitter
 
 PublicRequestAdapter = Callable[[dict[str, Any]], AgentRequest]
 InternalRequestVerifier = Callable[[Request], object]
+ChannelRequestVerifier = Callable[[Request], object]
 _DEADLINE_HEADER = "X-Muye-Deadline-Unix-Ms"
 
 
@@ -29,6 +30,7 @@ def create_app(
     public_request_adapter: PublicRequestAdapter | None = None,
     cors_origins: list[str] | None = None,
     internal_request_verifier: InternalRequestVerifier | None = None,
+    channel_request_verifier: ChannelRequestVerifier | None = None,
 ) -> FastAPI:
     """创建标准 Agent ASGI 应用；内部认证由部署层注入 verifier。"""
     from fastapi.middleware.cors import CORSMiddleware
@@ -113,6 +115,26 @@ def create_app(
         async def public_cancel(request: CancelRequest) -> dict[str, Any]:
             return (await agent.cancel(user_id=request.user_id, session_id=request.session_id, profile="public", run_id=request.run_id)).model_dump()
 
+    if channel_request_verifier is not None:
+        @app.post("/internal/v1/channels/invoke", response_model=ChannelInvokeResponse)
+        async def channel_invoke(request: ChannelInvokeRequest, raw_request: Request) -> ChannelInvokeResponse:
+            """执行受认证的通道消息，永不接纳 provider 私有令牌。"""
+            await _verify_internal_request(raw_request, channel_request_verifier)
+            agent_request = AgentRequest(
+                task=request.message.content,
+                context=AgentContext(
+                    user_id=request.user_id,
+                    session_id=request.session_id,
+                    trace_id=request.trace_id,
+                    extra={"channel": request.channel, "channel_message_id": request.message_id},
+                ),
+            )
+            result = await agent.invoke(
+                agent_request,
+                options=ExecutionOptions(profile="internal", context_enabled="internal" in agent.config.context.enabled_profiles),
+            )
+            return _channel_response(result)
+
     return app
 
 
@@ -176,6 +198,19 @@ def _public_response(result: AgentResult) -> dict[str, Any]:
     if result.citations:
         body["citations"] = [citation.model_dump(mode="json") for citation in result.citations]
     return body
+
+
+def _channel_response(result: AgentResult) -> ChannelInvokeResponse:
+    """将 Agent 结果缩减为可由 provider 投递的单条文本。"""
+    trace_id = result.trace_id or "unknown"
+    if result.status == "clarification_needed" and result.clarification_question:
+        return ChannelInvokeResponse(status=result.status, trace_id=trace_id, message=ChannelTextMessage(content=result.clarification_question))
+    if result.status == "success":
+        markdown = public_markdown(result.result_data or {})
+        if markdown:
+            return ChannelInvokeResponse(status="success", trace_id=trace_id, message=ChannelTextMessage(content=markdown))
+        return ChannelInvokeResponse(status="error", trace_id=trace_id, error={"code": "INVALID_AGENT_RESPONSE", "message": "Agent 未返回可发送文本", "recoverable": False})
+    return ChannelInvokeResponse(status=result.status, trace_id=trace_id, error=result.error)
 
 
 async def _verify_internal_request(

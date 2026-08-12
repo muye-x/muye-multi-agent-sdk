@@ -40,3 +40,6 @@ __all__ = [
     "InternalAgentClientError",
     "build_chat_model",
 ]
+from .channel import ChannelAgentClient, ChannelAgentClientError
+
+__all__ = ["ChannelAgentClient", "ChannelAgentClientError"]
