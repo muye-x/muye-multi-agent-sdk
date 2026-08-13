@@ -1,5 +1,7 @@
 # Muye Multi-Agent SDK
 
+[English](README.en.md) · 简体中文
+
 `muye-multi-agent-sdk` 是独立的 Python Agent SDK。
 发布名为 `muye-multi-agent-sdk`，Python 导入名为 `muye_multi_agent_sdk`。
 
