@@ -120,13 +120,27 @@ def create_app(
         async def channel_invoke(request: ChannelInvokeRequest, raw_request: Request) -> ChannelInvokeResponse:
             """执行受认证的通道消息，永不接纳 provider 私有令牌。"""
             await _verify_internal_request(raw_request, channel_request_verifier)
+            channel_extra = {
+                "channel": request.channel,
+                "channel_message_id": request.message_id,
+                **{
+                    key: value
+                    for key, value in {
+                        "channel_account_id": request.channel_account_id,
+                        "tenant_id": request.tenant_id,
+                        "conversation_id": request.conversation_id,
+                        "reply_handle": request.reply_handle,
+                    }.items()
+                    if value is not None
+                },
+            }
             agent_request = AgentRequest(
                 task=request.message.content,
                 context=AgentContext(
                     user_id=request.user_id,
                     session_id=request.session_id,
                     trace_id=request.trace_id,
-                    extra={"channel": request.channel, "channel_message_id": request.message_id},
+                    extra=channel_extra,
                 ),
             )
             result = await agent.invoke(

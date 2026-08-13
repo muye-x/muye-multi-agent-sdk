@@ -103,11 +103,18 @@ class ChannelInvokeRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    protocol_version: Literal["muye-agent-channel/2.0"] = "muye-agent-channel/2.0"
+
     channel: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,31}$")
     user_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
     session_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
     trace_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{7,127}$")
     message_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$")
+    channel_account_id: str | None = Field(default=None, max_length=128)
+    tenant_id: str | None = Field(default=None, max_length=128)
+    conversation_id: str | None = Field(default=None, max_length=128)
+    occurred_at: str | None = Field(default=None, max_length=64)
+    reply_handle: str | None = Field(default=None, max_length=4096)
     message: ChannelTextMessage
 
 

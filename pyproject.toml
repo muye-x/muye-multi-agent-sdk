@@ -9,6 +9,7 @@ description = "Muye 独立多 Agent SDK，支持 Custom、Graph 和 ReAct 模式
 readme = "README.md"
 license = "MIT"
 authors = [{name = "Muye"}]
+keywords = ["Agent", "SDK", "multi-agent", "Python"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
@@ -49,6 +50,12 @@ dev = [
     "respx>=0.21",
     "wheel>=0.41",
 ]
+
+[project.urls]
+Homepage = "https://github.com/muye-x/muye-multi-agent-sdk"
+Documentation = "https://github.com/muye-x/muye-multi-agent-sdk/blob/main/README.md"
+"English Documentation" = "https://github.com/muye-x/muye-multi-agent-sdk/blob/main/README.en.md"
+Repository = "https://github.com/muye-x/muye-multi-agent-sdk"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
